@@ -1,5 +1,4 @@
 import { Pool } from 'pg';
-import { sql } from '@vercel/postgres';
 import {
   CustomerField,
   CustomersTableType,
@@ -11,7 +10,7 @@ import {
 import { formatCurrency } from './utils';
 
 
-const pool = new Pool({ connectionString: process.env.POSTGRES_URL });
+export const pool = new Pool({ connectionString: process.env.POSTGRES_URL });
 
 export async function fetchRevenue() {
   try {
@@ -21,7 +20,8 @@ export async function fetchRevenue() {
     console.log('Fetching revenue data...');
     await new Promise((resolve) => setTimeout(resolve, 3000));
 
-    const data = await pool.query(`SELECT * FROM revenue`);
+    const data = await pool.query<Revenue>(`SELECT * FROM revenue`);
+
 
     console.log('Data fetch completed after 3 seconds.');
 
@@ -34,7 +34,7 @@ export async function fetchRevenue() {
 
 export async function fetchLatestInvoices() {
   try {
-    const data = await pool.query(`
+    const data = await pool.query<LatestInvoiceRaw>(`
       SELECT invoices.amount, customers.name, customers.image_url, customers.email, invoices.id
       FROM invoices
       JOIN customers ON invoices.customer_id = customers.id
@@ -95,7 +95,7 @@ export async function fetchFilteredInvoices(
   const offset = (currentPage - 1) * ITEMS_PER_PAGE;
 
   try {
-    const invoices = await pool.query(`
+    const invoices = await pool.query<InvoicesTable>(`
       SELECT
         invoices.id,
         invoices.amount,
@@ -114,7 +114,7 @@ export async function fetchFilteredInvoices(
         invoices.status ILIKE $1
       ORDER BY invoices.date DESC
       LIMIT $2 OFFSET $3
-    `, [query, ITEMS_PER_PAGE, offset]);
+    `, [query+"%", ITEMS_PER_PAGE, offset]);
 
     return invoices.rows;
   } catch (error) {
@@ -125,16 +125,16 @@ export async function fetchFilteredInvoices(
 
 export async function fetchInvoicesPages(query: string) {
   try {
-    const count = await sql`SELECT COUNT(*)
+    const count = await pool.query(`SELECT COUNT(*)
     FROM invoices
     JOIN customers ON invoices.customer_id = customers.id
     WHERE
-      customers.name ILIKE ${`%${query}%`} OR
-      customers.email ILIKE ${`%${query}%`} OR
-      invoices.amount::text ILIKE ${`%${query}%`} OR
-      invoices.date::text ILIKE ${`%${query}%`} OR
-      invoices.status ILIKE ${`%${query}%`}
-  `;
+      customers.name ILIKE $1 OR
+      customers.email ILIKE $1 OR
+      invoices.amount::text ILIKE $1 OR
+      invoices.date::text ILIKE $1 OR
+      invoices.status ILIKE $1
+  `, ["%"+query+"%"]);
 
     const totalPages = Math.ceil(Number(count.rows[0].count) / ITEMS_PER_PAGE);
     return totalPages;
@@ -146,15 +146,15 @@ export async function fetchInvoicesPages(query: string) {
 
 export async function fetchInvoiceById(id: string) {
   try {
-    const data = await sql<InvoiceForm>`
+    const data = await pool.query<InvoiceForm>(`
       SELECT
         invoices.id,
         invoices.customer_id,
         invoices.amount,
         invoices.status
       FROM invoices
-      WHERE invoices.id = ${id};
-    `;
+      WHERE invoices.id = $1;
+    `, [id]);
 
     const invoice = data.rows.map((invoice) => ({
       ...invoice,
@@ -171,13 +171,13 @@ export async function fetchInvoiceById(id: string) {
 
 export async function fetchCustomers() {
   try {
-    const data = await sql<CustomerField>`
+    const data = await pool.query<CustomerField>(`
       SELECT
         id,
         name
       FROM customers
       ORDER BY name ASC
-    `;
+    `);
 
     const customers = data.rows;
     return customers;
@@ -189,7 +189,7 @@ export async function fetchCustomers() {
 
 export async function fetchFilteredCustomers(query: string) {
   try {
-    const data = await sql<CustomersTableType>`
+    const data = await pool.query<CustomersTableType>(`
 		SELECT
 		  customers.id,
 		  customers.name,
@@ -201,11 +201,11 @@ export async function fetchFilteredCustomers(query: string) {
 		FROM customers
 		LEFT JOIN invoices ON customers.id = invoices.customer_id
 		WHERE
-		  customers.name ILIKE ${`%${query}%`} OR
-        customers.email ILIKE ${`%${query}%`}
+		  customers.name ILIKE $1 OR
+        customers.email ILIKE $1
 		GROUP BY customers.id, customers.name, customers.email, customers.image_url
 		ORDER BY customers.name ASC
-	  `;
+	  `, ["%"+query+"%"]);
 
     const customers = data.rows.map((customer) => ({
       ...customer,
